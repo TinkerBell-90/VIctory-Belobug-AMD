@@ -1580,9 +1580,25 @@ pub(super) fn with_mask_ops_on_numbers<R>(translate: impl FnOnce() -> R) -> R {
 }
 
 pub(super) fn host_max_wave() -> u32 {
-    THREAD_MAX_WAVE
-        .get()
-        .unwrap_or_else(|| HOST_MAX_WAVE.load(std::sync::atomic::Ordering::Relaxed))
+    let host = || match HOST_MAX_WAVE.load(std::sync::atomic::Ordering::Relaxed) {
+        #[cfg(test)]
+        0 => test_host_wave(),
+        lanes => lanes,
+    };
+    THREAD_MAX_WAVE.get().unwrap_or_else(host)
+}
+
+/// `VICTORY_TEST_HOST_WAVE=32`: tests translate as for a host whose waves are at most 32
+/// lanes (NVIDIA, Intel), the width `victory-gpu` passes there, instead of with no host
+/// width (which lowers as a 64-lane host does). An RDNA card runs waves of 32 too, so it
+/// runs the GPU tests in the form those hosts get. A test that sets its own width keeps it.
+#[cfg(test)]
+fn test_host_wave() -> u32 {
+    static WAVE: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *WAVE.get_or_init(|| {
+        let wave = std::env::var("VICTORY_TEST_HOST_WAVE").ok();
+        wave.and_then(|v| v.trim().parse().ok()).unwrap_or(0)
+    })
 }
 
 thread_local! {
